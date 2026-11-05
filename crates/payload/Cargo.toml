@@ -1,0 +1,16 @@
+[package]
+name = "payload"
+description = "The dylib ErisLiveResize loads into apps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "liveresize"
+crate-type = ["cdylib"]
+test = false
+
+[dependencies]
+eris-inject-payload = { git = "https://github.com/Eriskii/ErisMacInjectLib", tag = "v0.1.2" }

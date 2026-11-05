@@ -1,0 +1,11 @@
+[package]
+name = "liveresize"
+description = "Real live resizes for windows resized by a window manager, on macOS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+eris-inject = { git = "https://github.com/Eriskii/ErisMacInjectLib", tag = "v0.1.2" }
