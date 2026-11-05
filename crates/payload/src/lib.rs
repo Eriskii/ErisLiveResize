@@ -16,7 +16,7 @@ use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 pub(crate) use eris_inject_payload::{log, msg, objc, rt};
 
 use eris_inject_payload::sys::{SpinLock, notify_get_state, notify_register_check, observe_darwin, on_main};
-use objc::{Id, Imp, Original, Sel, class, define_class, release, retain, swizzle};
+use objc::{Id, Imp, Original, Sel, class, define_class, nsstring, release, retain, swizzle};
 
 eris_inject_payload::payload!(name: "liveresize", log: "liveresize", start: start);
 
@@ -57,6 +57,56 @@ extern "C" fn set_frame(this: Id, cmd: Sel, frame: CGRect, display: bool) {
         begin(this);
     }
     original(this, cmd, frame, display)
+}
+
+/// Accessibility attributes of ours. A window manager can only set a window's size and its position
+/// one at a time, and the window is drawn in between: one that's being resized from its left edge
+/// has its right edge jump about. This one sets the two at once. Its value is a CGRect from the top
+/// left of the screen, as Accessibility's are.
+const FRAME_ATTRIBUTE: &CStr = c"AXErisFrame";
+
+/// Reads as true where [`FRAME_ATTRIBUTE`] works. Setting an attribute an app doesn't know reports
+/// no error, so a window manager has to ask.
+const SUPPORTED_ATTRIBUTE: &CStr = c"AXErisFrameSupported";
+
+fn is_attribute(attribute: Id, name: &CStr) -> bool {
+    !attribute.is_null() && msg!(bool; attribute, c"isEqualToString:", nsstring(name) => Id)
+}
+
+fn is_window(object: Id) -> bool {
+    msg!(bool; object, c"isKindOfClass:", class(c"NSWindow") => Id)
+}
+
+fn set_frame_from_accessibility(window: Id, value: Id) {
+    if value.is_null() {
+        return;
+    }
+    // AppKit hands us the rect from the bottom left of the screen already.
+    let frame = msg!(CGRect; value, c"rectValue");
+    msg!((); window, c"setFrame:display:", frame => CGRect, true => bool);
+}
+
+/// `-[NSObject accessibilitySetValue:forAttribute:]`, where a set of an attribute AppKit doesn't
+/// know ends up, on the main thread.
+static SET_VALUE: Original = Original::new();
+
+extern "C" fn set_value(this: Id, cmd: Sel, value: Id, attribute: Id) {
+    let original: extern "C" fn(Id, Sel, Id, Id) = unsafe { transmute(SET_VALUE.get()) };
+    if is_attribute(attribute, FRAME_ATTRIBUTE) && is_window(this) {
+        set_frame_from_accessibility(this, value);
+        return;
+    }
+    original(this, cmd, value, attribute)
+}
+
+static ATTRIBUTE_VALUE: Original = Original::new();
+
+extern "C" fn attribute_value(this: Id, cmd: Sel, attribute: Id) -> Id {
+    let original: extern "C" fn(Id, Sel, Id) -> Id = unsafe { transmute(ATTRIBUTE_VALUE.get()) };
+    if is_attribute(attribute, SUPPORTED_ATTRIBUTE) && is_window(this) {
+        return msg!(Id; class(c"NSNumber"), c"numberWithBool:", true => bool);
+    }
+    original(this, cmd, attribute)
 }
 
 fn begin(window: Id) {
@@ -126,6 +176,12 @@ fn start(injected: bool) {
     if !swizzle(c"NSWindow", c"setFrame:display:", set_frame as Imp, &SET_FRAME) {
         log!("missing NSWindow.setFrame:display:; nothing to do");
         return;
+    }
+    // Together or not at all: a window manager that's told frames work has to be able to set them.
+    if !swizzle(c"NSWindow", c"accessibilitySetValue:forAttribute:", set_value as Imp, &SET_VALUE)
+        || !swizzle(c"NSWindow", c"accessibilityAttributeValue:", attribute_value as Imp, &ATTRIBUTE_VALUE)
+    {
+        log!("missing NSWindow accessibility methods; frames are set one part at a time");
     }
     adopt_state();
     log!("running in pid {pid}");

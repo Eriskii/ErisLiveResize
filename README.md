@@ -25,6 +25,16 @@ notifyutil -p io.github.eriskii.liveresize.active
 [Eriskii/yabai](https://github.com/Eriskii/yabai) sets it during a drag. Without a window manager
 setting it, the payload does nothing.
 
+## Setting a frame in one go
+
+Accessibility can only set a window's size and its position one at a time, and the window is drawn in
+between: one that's being resized from its left edge has its right edge jump about. The payload adds
+two attributes to windows for this:
+
+- `AXErisFrameSupported` reads as true where the payload is loaded. Setting an attribute an app doesn't
+  have can report no error, so ask this first.
+- `AXErisFrame` takes a `CGRect` from the top left of the screen, like `AXPosition` and `AXSize`.
+
 ## Requirements
 
 - Apple Silicon, macOS 26
